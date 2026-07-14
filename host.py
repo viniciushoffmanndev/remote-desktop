@@ -39,8 +39,8 @@ else:
 
 def tratar_autenticacao(ssl_conn):
     try:
-        # 1. Previne Port Scan/Slowloris: Máximo de 5 segundos para mandar a senha
-        ssl_conn.settimeout(5.0) 
+        # 1. Previne Port Scan/Slowloris: Máximo de 8 segundos para mandar a senha
+        ssl_conn.settimeout(8.0) 
         
         # 3. Resolve a Fragmentação TCP na leitura da senha
         buffer = ""
