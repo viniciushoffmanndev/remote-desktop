@@ -43,3 +43,51 @@ graph TD
     EnvC[.env: IP_DESTINO=IP_DO_HOST] --> C
 
 ```
+
+## 🔄 Fluxo de Comunicação e Segurança
+
+O diagrama abaixo ilustra o ciclo de vida de uma sessão, desde o aperto de mão (handshake) TLS até a transmissão contínua de frames e eventos de periféricos:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Desenvolvedor (Cliente)
+    participant Client as client.py
+    participant Host as host.py (Servidor)
+    actor OS as SO do Host
+
+    Note over Client, Host: 1. Canal Seguro (TLS 1.2)
+    Client->>Host: Solicitação de conexão TCP
+    Host-->>Client: Handshake TLS (Apresenta server.crt)
+    Note over Client: Valida cadeia criptográfica
+    Client->>Host: Conexão segura estabelecida
+
+    Note over Client, Host: 2. Autenticação HMAC
+    Client->>Host: Envia SEGREDO_COMPARTILHADO + '\n'
+    Note over Host: hmac.compare_digest()<br/>(Prevenção contra Timing Attacks)
+    alt Segredo Válido
+        Host-->>Client: Retorna Status 1 (Sucesso)
+    else Segredo Inválido
+        Host-->>Client: Retorna Status 0 (Falha)
+        Note over Host: Encerra socket abruptamente
+    end
+
+    Note over Client, Host: 3. Loop de Transmissão Ativa (~30 FPS)
+    loop Sessão Ativa
+        Host->>OS: Captura tela rápida (mss)
+        Note over Host: Comprime imagem para JPEG (Qualidade 60)
+        Host->>Client: Envia tamanho (4-byte) + payload de vídeo
+        Client->>Dev: Renderiza frame no OpenCV (Janela "Acesso Remoto")
+        
+        opt Interação do Usuário
+            Dev->>Client: Clique/Movimento na janela
+            Client->>Host: Comando via fila ("click,x,y\n")
+            Host->>OS: Executa ação periférica (PyAutoGUI)
+        end
+    end
+
+    Note over Client, Host: 4. Desconexão Limpa (Teclado/Interface)
+    Dev->>Client: Pressiona ESC ou fecha no "X"
+    Client->>Host: Notifica encerramento
+    Note over Client, Host: Encerram sockets de forma ordenada (SHUT_RDWR)
+```
