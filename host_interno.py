@@ -1,5 +1,3 @@
-# O programa que vai rodar no PC a ser controlado
-
 import socket
 import struct
 import mss
@@ -11,6 +9,8 @@ import time
 import ssl
 import os
 import sys
+import hmac
+import select
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,47 +39,74 @@ else:
 
 def tratar_autenticacao(ssl_conn):
     try:
-        dados_auth = ssl_conn.recv(len(SEGREDO_COMPARTILHADO.encode('utf-8'))).decode('utf-8')
-        if dados_auth == SEGREDO_COMPARTILHADO:
+        # 1. Previne Port Scan/Slowloris: Máximo de 5 segundos para mandar a senha
+        ssl_conn.settimeout(5.0) 
+        
+        # 3. Resolve a Fragmentação TCP na leitura da senha
+        buffer = ""
+        while '\n' not in buffer:
+            chunk = ssl_conn.recv(1024).decode('utf-8')
+            if not chunk:
+                return False
+            buffer += chunk
+            
+        dados_auth = buffer.split('\n')[0].strip()
+        
+        # 2. Previne Timing Attacks comparando os hashes de forma segura
+        if hmac.compare_digest(dados_auth, SEGREDO_COMPARTILHADO):
             ssl_conn.sendall(struct.pack(">L", 1))
+            ssl_conn.settimeout(None) # Remove o timeout para não atrapalhar o vídeo
             return True
         else:
             ssl_conn.sendall(struct.pack(">L", 0))
             return False
+            
+    except socket.timeout:
+        print("Autenticação falhou: Cliente demorou muito para responder (Timeout).")
+        return False
     except Exception as e:
         print(f"Erro na autenticação: {e}")
         return False
+    finally:
+        # Garante que, independente do erro, o socket não fique com timeout preso caso sobreviva
+        ssl_conn.settimeout(None)
 
 def tratar_comandos(conexao, stop_event):
     buffer = ""
     while not stop_event.is_set():
         try:
-            conexao.settimeout(1.0)
-            dados = conexao.recv(1024).decode('utf-8')
-            if not dados:
-                break
-                
-            buffer += dados
-            if '\n' in buffer:
-                linhas = buffer.split('\n')
-                buffer = linhas.pop()
-                
-                for linha in linhas:
-                    if not linha.strip(): continue
-                    partes = linha.split(',')
-                    if len(partes) == 3:
-                        cmd, x, y = partes
-                        try:
-                            x, y = int(x), int(y)
-                            if cmd == "click": pyautogui.click(x, y)
-                            elif cmd == "move": pyautogui.moveTo(x, y)
-                        except ValueError:
-                            pass
-        except socket.timeout:
-            continue
+            # 6. Resolve o Timeout Global espiando a rede sem alterar configurações do socket
+            ready_to_read, _, _ = select.select([conexao], [], [], 1.0)
+            
+            if ready_to_read:
+                dados = conexao.recv(1024).decode('utf-8')
+                if not dados:
+                    break
+                    
+                buffer += dados
+                if '\n' in buffer:
+                    linhas = buffer.split('\n')
+                    buffer = linhas.pop()
+                    
+                    for linha in linhas:
+                        if not linha.strip():
+                            continue
+                        partes = linha.split(',')
+                        if len(partes) == 3:
+                            cmd, x, y = partes
+                            try:
+                                x, y = int(x), int(y)
+                                if cmd == "click": 
+                                    pyautogui.click(x, y)
+                                elif cmd == "move": 
+                                    pyautogui.moveTo(x, y)
+                            except ValueError:
+                                # 5. Corrige o Silenciamento Inseguro informando o erro
+                                print(f"[!] Aviso: coordenadas inválidas recebidas: {partes}")
         except (ConnectionResetError, ConnectionAbortedError, ssl.SSLError):
             break
-        except Exception:
+        except Exception as e:
+            print(f"[!] Erro inesperado na thread de comandos: {e}")
             break
 
 def iniciar_host():
@@ -98,7 +125,7 @@ def iniciar_host():
         try:
             # BLINDAGEM SSL EXPLICITA PARA O SERVIDOR
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1 # Bloqueia protocolos antigos
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             
             # CARREGAMENTO OBRIGATÓRIO DOS CERTIFICADOS
             if not os.path.exists("server.crt") or not os.path.exists("server.key"):
@@ -136,6 +163,9 @@ def iniciar_host():
                     pacote = struct.pack(">L", len(dados_bytes)) + dados_bytes
                     ssl_server.sendall(pacote)
                     
+                    # 4. Resolve o Fritador de CPU limitando a ~30 FPS
+                    time.sleep(1 / 30)
+                    
         except (ConnectionResetError, BrokenPipeError, ssl.SSLError) as e:
             print(f"[-] Cliente desconectado. Motivo: {e}")
         except Exception as e:
@@ -146,8 +176,8 @@ def iniciar_host():
                 try:
                     ssl_server.shutdown(socket.SHUT_RDWR)
                     ssl_server.close()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[!] Erro ao fechar conexão SSL: {e}")
             time.sleep(0.5)
 
 if __name__ == "__main__":
