@@ -218,7 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Gerar segredo aleatório
-secrets.py
+gerar_segredo.py
 
 # privada RSA / certificado autoassinado
 gerar_cert.py
