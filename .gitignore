@@ -226,3 +226,6 @@ gerar_cert.py
 # Certificado / Chave
 *.crt 
 *.key
+
+# Executavél
+*.exe
